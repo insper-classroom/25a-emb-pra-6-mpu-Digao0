@@ -13,6 +13,13 @@
 #include "Fusion.h"
 #define SAMPLE_PERIOD (0.01f) // replace this with actual sample period
 
+QueueHandle_t xQueueData;
+
+typedef struct adc {
+    int axis;
+    int val;
+} adc_t;
+
 const int MPU_ADDRESS = 0x68;
 const int I2C_SDA_GPIO = 4;
 const int I2C_SCL_GPIO = 5;
@@ -70,21 +77,63 @@ void mpu6050_task(void *p) {
     mpu6050_reset();
     int16_t acceleration[3], gyro[3], temp;
 
+
+    FusionAhrs ahrs;
+    FusionAhrsInitialise(&ahrs);
+
     while(1) {
-        // leitura da MPU, sem fusao de dados
         mpu6050_read_raw(acceleration, gyro, &temp);
-        printf("Acc. X = %d, Y = %d, Z = %d\n", acceleration[0], acceleration[1], acceleration[2]);
-        printf("Gyro. X = %d, Y = %d, Z = %d\n", gyro[0], gyro[1], gyro[2]);
-        printf("Temp. = %f\n", (temp / 340.0) + 36.53);
+        FusionVector gyroscope = {
+            .axis.x = gyro[0] / 131.0f, // Conversão para graus/s
+            .axis.y = gyro[1] / 131.0f,
+            .axis.z = gyro[2] / 131.0f,
+        };
+  
+        FusionVector accelerometer = {
+            .axis.x = acceleration[0] / 16384.0f, // Conversão para g
+            .axis.y = acceleration[1] / 16384.0f,
+            .axis.z = acceleration[2] / 16384.0f,
+        };      
+  
+        FusionAhrsUpdateNoMagnetometer(&ahrs, gyroscope, accelerometer, SAMPLE_PERIOD);
+  
+        const FusionEuler euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&ahrs));
+
+        // Converte roll e pitch para inteiros pequenos (ajustar sensibilidade)
+        float pitch = (euler.angle.pitch); // eixo 1 (vertical)
+        float roll  = (euler.angle.roll); // eixo 0 (horizontal)
+
+        adc_t x_data = {.axis = 0, .val = pitch};
+        adc_t y_data = {.axis = 1, .val = roll};
+
+        xQueueSend(xQueueData, &x_data, 0);
+        xQueueSend(xQueueData, &y_data, 0);
 
         vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+void uart_task(void *p) {
+    while (1) {
+        adc_t data;
+        if (xQueueReceive(xQueueData, &data, portMAX_DELAY)) {
+            uint8_t bytes[4];
+            bytes[0] = (uint8_t)data.axis; 
+            bytes[1] = (uint8_t)(data.val >> 8) & 0xFF; 
+            bytes[2] = (uint8_t)(data.val & 0xFF);
+            bytes[3] = 0xFF; 
+            uart_write_blocking(uart0, bytes, sizeof(bytes)); 
+        }
     }
 }
 
 int main() {
     stdio_init_all();
 
+    xQueueData = xQueueCreate(2, sizeof(adc_t)); // tamanho adc
+
     xTaskCreate(mpu6050_task, "mpu6050_Task 1", 8192, NULL, 1, NULL);
+    xTaskCreate(uart_task, "UART Task", 256, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
