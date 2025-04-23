@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 from time import sleep
+import time
 
 def move_mouse(axis, value):
     """Move o mouse de acordo com o eixo e valor recebidos."""
@@ -20,6 +21,10 @@ def controle(ser):
     Loop principal que lê bytes da porta serial em loop infinito.
     Aguarda o byte 0xFF e então lê 3 bytes: axis (1 byte) + valor (2 bytes).
     """
+
+    last_click_time = 0
+    click_interval = 0.5  # segundos para evitar múltiplos cliques acidentais
+
     while True:
         # Aguardar byte de sincronização
         sync_byte = ser.read(size=1)
@@ -30,10 +35,17 @@ def controle(ser):
             data = ser.read(size=3)
             if len(data) < 3:
                 continue
-            print(data)
+            #print(data)
             axis, value = parse_data(data)
+            print(f"Axis: {axis}, Value: {value}")  # debug
             
-            move_mouse(axis, value)
+            if axis == 2 and value == 1:
+                current_time = time.time()
+                if current_time - last_click_time > click_interval:
+                    pyautogui.click()
+                    last_click_time = current_time
+            else:
+                move_mouse(axis, value)
 
 def serial_ports():
     """Retorna uma lista das portas seriais disponíveis na máquina."""

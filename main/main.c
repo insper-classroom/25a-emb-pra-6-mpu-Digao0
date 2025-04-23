@@ -81,6 +81,9 @@ void mpu6050_task(void *p) {
     FusionAhrs ahrs;
     FusionAhrsInitialise(&ahrs);
 
+
+    const float threshold = 1.5f;  // ajuste esse valor conforme teste
+
     while(1) {
         mpu6050_read_raw(acceleration, gyro, &temp);
         FusionVector gyroscope = {
@@ -106,8 +109,27 @@ void mpu6050_task(void *p) {
         adc_t x_data = {.axis = 0, .val = pitch};
         adc_t y_data = {.axis = 1, .val = roll};
 
-        xQueueSend(xQueueData, &x_data, 0);
-        xQueueSend(xQueueData, &y_data, 0);
+        //xQueueSend(xQueueData, &x_data, 0);
+        //xQueueSend(xQueueData, &y_data, 0);
+
+        float accel_magnitude = sqrtf(
+            accelerometer.axis.x * accelerometer.axis.x +
+            accelerometer.axis.y * accelerometer.axis.y +
+            accelerometer.axis.z * accelerometer.axis.z
+        );
+
+        //float delta = fabsf(accel_magnitude - last_accel_magnitude);
+
+        if (accel_magnitude > threshold) {
+            // Envia evento de click (axis 2, val 1)
+            adc_t click_data = {.axis = 2, .val = 1};
+            xQueueSend(xQueueData, &click_data, 0);
+        } else{
+            xQueueSend(xQueueData, &x_data, 0);
+            xQueueSend(xQueueData, &y_data, 0);
+        }
+
+        //last_accel_magnitude = accel_magnitude;
 
         vTaskDelay(pdMS_TO_TICKS(10));
     }
